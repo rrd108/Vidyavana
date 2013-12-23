@@ -2,20 +2,21 @@ package hu.vidyavana.ui;
 
 import hu.vidyavana.db.*;
 import hu.vidyavana.db.api.*;
-import hu.vidyavana.db.model.Settings;
+import hu.vidyavana.db.model.*;
+import hu.vidyavana.ui.model.VDocument;
 import hu.vidyavana.util.*;
 import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.io.IOException;
 import java.lang.Thread.UncaughtExceptionHandler;
-import java.util.Date;
 import java.util.concurrent.*;
 import javax.imageio.ImageIO;
 import javax.swing.*;
 import javax.swing.UIManager.LookAndFeelInfo;
-import javax.swing.border.*;
+import javax.swing.border.BevelBorder;
+import javax.swing.text.*;
 import org.apache.lucene.index.IndexWriter;
-import com.sleepycat.persist.EntityCursor;
+import com.sleepycat.persist.*;
 
 public class Main implements UncaughtExceptionHandler
 {
@@ -25,7 +26,8 @@ public class Main implements UncaughtExceptionHandler
 	public JFrame frame;
 	private JMenuBar menuBar;
 	private JToolBar toolBar;
-	public String dbCreatedAt;
+	public VDocument doc;
+	public JTextPane textPane;
 
 
 	public static void main(String[] args)
@@ -108,18 +110,16 @@ public class Main implements UncaughtExceptionHandler
 	private void databaseMigration()
 	{
 		Db.openForWrite();
-		EntityCursor<Settings> c = Settings.pkIdx().entities();
-		Settings set = c.first();
-		c.close();
-		if(set != null)
-			dbCreatedAt = set.createdAt;
-		else
+		PrimaryIndex<String, Settings> settings = Settings.pkIdx();
+		EntityCursor<Settings> crsr = settings.entities();
+		Settings rec = crsr.first();
+		crsr.close();
+		if(rec == null)
 		{
-			set = new Settings();
-			dbCreatedAt = set.createdAt = new Date().toString();
-			set.dbMigrate = "0";
-			set.booksVersion = "0";
-			Settings.pkIdx().put(set);
+			rec = new Settings();
+			rec.dbMigrate = "0";
+			rec.booksVersion = "0";
+			settings.put(rec);
 		}
 		Db.openForRead();
 	}
@@ -156,21 +156,19 @@ public class Main implements UncaughtExceptionHandler
 		addDatabaseMenu();
 
 		toolBar = new JToolBar();
-		toolBar.setBorder(new EtchedBorder());
+		// toolBar.setBorder(new EtchedBorder());
 		toolBar.add(new JButton("Placeholder"));
 
-		JTextArea textArea = new JTextArea();
-		textArea.setText("Text area");
-		textArea.setFont(new Font("Times", Font.PLAIN, 20));
-		textArea.setWrapStyleWord(true);
-		JScrollPane textPane = new JScrollPane();
-		textPane.setViewportView(textArea);
+		UIManager.put("TextPane.font", new Font("Times New Roman", Font.PLAIN, 24));  
+		textPane = new JTextPane();
+		JScrollPane scrollPane = new JScrollPane();
+		scrollPane.setViewportView(textPane);
 
 		frame = new JFrame("Vidyāvana");
 		setIcon(frame);
 		frame.setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
 		frame.setJMenuBar(menuBar);
-		frame.add(textPane);
+		frame.add(scrollPane);
 		frame.add(toolBar, BorderLayout.NORTH);
 		frame.setSize(1024, 600);
 		frame.setExtendedState(Frame.MAXIMIZED_BOTH);
@@ -265,7 +263,26 @@ public class Main implements UncaughtExceptionHandler
 				@Override
 				public void run()
 				{
-					String[] paths = {};
+					String[] paths = {
+						"d:\\wk2\\Sastra\\BBT\\v2012\\xml\\bg"/*,
+						"",
+						"d:\\wk2\\Sastra\\BBT\\v2012\\xml\\SB  1",
+						"d:\\wk2\\Sastra\\BBT\\v2012\\xml\\SB  2",
+						"d:\\wk2\\Sastra\\BBT\\v2012\\xml\\SB  3",
+						"d:\\wk2\\Sastra\\BBT\\v2012\\xml\\SB  4",
+						"d:\\wk2\\Sastra\\BBT\\v2012\\xml\\SB  5",
+						"d:\\wk2\\Sastra\\BBT\\v2012\\xml\\SB  6",
+						"d:\\wk2\\Sastra\\BBT\\v2012\\xml\\SB  7",
+						"d:\\wk2\\Sastra\\BBT\\v2012\\xml\\SB  8",
+						"d:\\wk2\\Sastra\\BBT\\v2012\\xml\\SB  9",
+						"d:\\wk2\\Sastra\\BBT\\v2012\\xml\\SB 10",
+						"d:\\wk2\\Sastra\\BBT\\v2012\\xml\\kb",
+						"",
+						"d:\\wk2\\Sastra\\BBT\\v2012\\xml\\cc-adi",
+						"d:\\wk2\\Sastra\\BBT\\v2012\\xml\\cc-madhya",
+						"d:\\wk2\\Sastra\\BBT\\v2012\\xml\\cc-antya" */
+						
+					};
 					IndexWriter writer = Lucene.inst.open().writer();
 					for(int bookId = 1; bookId <= paths.length; ++bookId)
 					{
@@ -275,6 +292,7 @@ public class Main implements UncaughtExceptionHandler
 						new AddBook(bookId, paths[bookId - 1], writer).run();
 					}
 					Lucene.inst.closeWriter();
+					messageBox("Könyv(ek) hozzáadva.", "Kész");
 				}
 			});
 		}
@@ -297,6 +315,43 @@ public class Main implements UncaughtExceptionHandler
 				@Override
 				public void run()
 				{
+					Timing.start();
+					Timing.start();
+					BookOrdinalKey start = new BookOrdinalKey(1, 0);
+					BookOrdinalKey end = new BookOrdinalKey(1, 100);
+					EntityCursor<Para> psCur = Para.pkIdx().entities(start, true, end, false);
+					Encrypt enc = Encrypt.getInstance();
+					Para p;
+					AttributeSet a = SimpleAttributeSet.EMPTY;
+					//StringBuilder sb = new StringBuilder(100000);
+					doc = new VDocument();
+					doc.startBatchInsert();
+					while((p=psCur.next()) != null)
+					{
+						String txt = enc.decrypt(p.text);
+						//sb.append(txt);
+						//sb.append('\n');
+						doc.append(txt.toCharArray(), a);
+						doc.appendPara(a);
+					}
+					psCur.close();
+					try
+					{
+//						StringContent content = new StringContent(100000);
+//						content.insertString(0, sb.toString());
+//						System.out.println(content.length());
+//						doc = new DefaultStyledDocument(content, new StyleContext());
+						doc.endBatchInsert(0);
+//						textPane.setEditorKit(new VEditorKit());
+						Timing.stop("Before setting document");
+						textPane.setDocument(doc);
+					}
+					catch(Exception ex)
+					{
+						ex.printStackTrace();
+					}
+					Timing.stop("Show Bg");
+					// messageBox("Loaded", "Msg");
 				}
 			});
 		}

@@ -1,6 +1,7 @@
 package hu.vidyavana.db.model;
 
 import hu.vidyavana.db.api.Db;
+import hu.vidyavana.ui.model.style.StyleRange;
 import com.sleepycat.persist.PrimaryIndex;
 import com.sleepycat.persist.model.*;
 
@@ -10,8 +11,10 @@ public class Para
 	@PrimaryKey
 	public BookOrdinalKey key;
 
-	public int style;
+	public byte style;
 	public byte[] text;
+	public byte softBreaks;
+	public StyleRange[] styleRanges;
 
 
 	public Para()
@@ -19,11 +22,10 @@ public class Para
 	}
 	
 	
-	public Para(int bookId, int bookParaOrdinal, int style, byte[] text)
+	public Para(int bookId, int bookParaOrdinal, int style)
 	{
 		this.key = new BookOrdinalKey(bookId, bookParaOrdinal);
-		this.style = style;
-		this.text = text;
+		this.style = (byte) style;
 	}
 	
 	

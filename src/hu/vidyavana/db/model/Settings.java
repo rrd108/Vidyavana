@@ -8,8 +8,6 @@ import com.sleepycat.persist.model.*;
 public class Settings
 {
 	@PrimaryKey
-	public String createdAt;
-
 	public String dbMigrate;
 	public String booksVersion;
 	

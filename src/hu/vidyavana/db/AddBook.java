@@ -3,9 +3,10 @@ package hu.vidyavana.db;
 import hu.vidyavana.convert.api.ParagraphClass;
 import hu.vidyavana.db.api.Db;
 import hu.vidyavana.db.model.*;
+import hu.vidyavana.ui.model.style.*;
 import hu.vidyavana.util.*;
 import java.io.*;
-import java.util.ArrayList;
+import java.util.*;
 import java.util.regex.*;
 import org.apache.lucene.document.*;
 import org.apache.lucene.document.Field.Store;
@@ -18,19 +19,23 @@ import com.sleepycat.persist.PrimaryIndex;
 public class AddBook
 {
 	public static Pattern XML_LINE = Pattern.compile("^\\s*(<p( class=\"(.*?)\")?.*?>)?(.*?)(</p>|$)");
+	public static Pattern MARKUP = Pattern.compile("<(.*?)>");
 	
 	private int bookId;
-	private String bookPath;
+	// private String bookPath;
 	private File bookDir;
 	private final IndexWriter iw;
 	private FieldType txtFieldType;
 	private ArrayList<String> bookFileNames;
+	private ArrayList<Integer> paraEndDocIndexes;
+	private int paraEndIx;
+	private StringBuilder plainSB;
 
 	
 	public AddBook(int bookId, String bookPath, IndexWriter writer)
 	{
 		this.bookId = bookId;
-		this.bookPath = bookPath;
+		// this.bookPath = bookPath;
 		bookDir = new File(bookPath);
 		this.iw = writer;
 		txtFieldType = new FieldType();
@@ -110,7 +115,9 @@ public class AddBook
 	private void addChapters()
 	{
 		PrimaryIndex<BookOrdinalKey, Para> idx = Para.pkIdx();
+		plainSB = new StringBuilder(10000);
 		int bookParaOrdinal = 0;
+		paraEndDocIndexes = new ArrayList<>(5000);
 		for(String fname : bookFileNames)
 		{
 			File f = new File(bookDir, fname);
@@ -144,7 +151,7 @@ public class AddBook
 							cls = ParagraphClass.TorzsKoveto;
 						}
 						
-						para = new Para(bookId, ++bookParaOrdinal, cls.code, null);
+						para = new Para(bookId, ++bookParaOrdinal, cls.code);
 						
 						String txt = m.group(4);
 						paraSB.setLength(0);
@@ -174,19 +181,28 @@ public class AddBook
 					try
 					{
 						in.close();
-				}
+					}
 					catch(IOException ex)
 					{
 						throw new RuntimeException(ex);
 					}
 			}
 		}
+		BookMeta bm = new BookMeta();
+		bm.id = bookId;
+		bm.paraEndDocIndexes = new int[paraEndDocIndexes.size()];
+		int ix = 0;
+		for(int val : paraEndDocIndexes)
+			bm.paraEndDocIndexes[ix++] = val;
+		BookMeta.pkIdx().put(bm);
 	}
 
 
 	private void addPara(Para para, StringBuilder paraSB, PrimaryIndex<BookOrdinalKey, Para> idx)
 	{
-		String paraTxt = paraSB.toString();
+		String paraTxt = parsePara(para, paraSB);
+		paraEndIx += paraTxt.length()+1;
+		paraEndDocIndexes.add(paraEndIx);
 		para.text = Encrypt.getInstance().encrypt(paraTxt);
 		idx.put(para);
 		
@@ -203,6 +219,86 @@ public class AddBook
 		{
 			throw new RuntimeException(ex);
 		}
+	}
+
+
+	/**
+	 * Separates paragraph into text and markup positions. 
+	 * 
+	 * @return Plain text of para
+	 */
+	private String parsePara(Para para, StringBuilder paraSB)
+	{
+		int src=0, dest=0;
+		plainSB.setLength(0);
+		List<StyleRange> styleRanges = null;
+		Stack<Integer> bold = null, italic = null, superscript = null, ref;
+		CharacterStyle charStyle = null;
+		Matcher m = MARKUP.matcher(paraSB);
+		while(m.find(src))
+		{
+			if(styleRanges == null)
+				styleRanges = new ArrayList<>();
+			int start = m.start();
+			if(start > 0)
+				plainSB.append(paraSB.substring(src, start));
+			src = m.end();
+			dest += start;
+			String mkp = m.group(1);
+			String baseMkp = mkp.charAt(0)=='/' ? mkp.substring(1) : mkp;
+			if("b".equals(baseMkp))
+			{
+				if(bold == null)
+					bold = new Stack<>();
+				ref = bold;
+				charStyle = CharacterStyle.Bold;
+			}
+			else if("i".equals(baseMkp))
+			{
+				if(italic == null)
+					italic = new Stack<>();
+				ref = italic;
+				charStyle = CharacterStyle.Italic;
+			}
+			else
+			{
+				if(superscript == null)
+					superscript = new Stack<>();
+				ref = superscript;
+				charStyle = CharacterStyle.Superscript;
+			}
+			switch(mkp)
+			{
+				case "b":
+				case "i":
+				case "sup":
+					ref.push(styleRanges.size());
+					StyleRange r = new StyleRange(dest, -1, charStyle);
+					styleRanges.add(r);
+					break;
+				case "/b":
+				case "/i":
+				case "/sup":
+					try
+					{
+						styleRanges.get(ref.pop()).end = (short) dest;
+					}
+					catch(Exception ignore)
+					{
+					}
+					break;
+				case "br/":
+					plainSB.append('\n');
+					++dest;
+					++para.softBreaks;
+					break;
+			}
+		}
+		if(src < paraSB.length())
+			plainSB.append(paraSB.substring(src));
+		if(styleRanges != null)
+			para.styleRanges = styleRanges.toArray(new StyleRange[styleRanges.size()]);
+		return plainSB.toString();
 	}
 
 
